@@ -131,6 +131,12 @@ export function useResume(initial: Resume) {
     updateAndSave(prev => ({ ...prev, template }))
   }, [updateAndSave])
 
+  // ─── Bulk replace (e.g. AI import) ──────────────────────────────────────────
+
+  const replaceResume = useCallback((updater: (prev: Resume) => Resume) => {
+    updateAndSave(updater)
+  }, [updateAndSave])
+
   return {
     resume,
     saving,
@@ -144,6 +150,7 @@ export function useResume(initial: Resume) {
     removeEducation,
     setSkillsFromString,
     setTemplate,
+    replaceResume,
     setResume,
   }
 }

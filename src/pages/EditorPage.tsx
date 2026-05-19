@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useReactToPrint } from 'react-to-print'
 import {
   Edit3, Eye, Download, Layout, BarChart2, FileText, Sparkles,
-  LogOut, Crown, ChevronLeft, Save, Loader2
+  LogOut, Crown, ChevronLeft, Save, Loader2, Upload
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useResume } from '@/hooks/useResume'
@@ -12,7 +12,9 @@ import { ResumePreview } from '@/components/resume/ResumePreview'
 import { ScorePanel } from '@/components/resume/ScorePanel'
 import { CoverLetterBuilder } from '@/components/resume/CoverLetterBuilder'
 import { TemplatesPanel } from '@/components/resume/TemplatesPanel'
+import { ResumeUploader } from '@/components/resume/ResumeUploader'
 import { PaywallModal } from '@/components/paywall/PaywallModal'
+import type { ParsedResume } from '@/lib/ai'
 import type { Resume } from '@/types'
 
 // Default blank resume for new users
@@ -76,6 +78,7 @@ export function EditorPage({ initialResume }: { initialResume?: Resume }) {
   const { user, profile, isPro } = useAuth()
   const [tab, setTab] = useState<Tab>('edit')
   const [paywall, setPaywall] = useState<string | null>(null)
+  const [showUploader, setShowUploader] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -91,7 +94,26 @@ export function EditorPage({ initialResume }: { initialResume?: Resume }) {
     removeEducation,
     setSkillsFromString,
     setTemplate,
+    replaceResume,
   } = useResume(initialResume || DEFAULT_RESUME)
+
+  function handleImportResume(data: ParsedResume) {
+    replaceResume(prev => ({
+      ...prev,
+      personal: { ...prev.personal, ...data.personal },
+      experience: data.experience.length
+        ? data.experience.map(e => ({ ...e, id: crypto.randomUUID() }))
+        : prev.experience,
+      education: data.education.length
+        ? data.education.map(e => ({ ...e, id: crypto.randomUUID() }))
+        : prev.education,
+      skills: data.skills.length
+        ? data.skills.map(name => ({ id: crypto.randomUUID(), name }))
+        : prev.skills,
+      updated_at: new Date().toISOString(),
+    }))
+    setTab('edit')
+  }
 
   const handlePrint = useReactToPrint({
     content: () => printRef.current,
@@ -204,6 +226,12 @@ export function EditorPage({ initialResume }: { initialResume?: Resume }) {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowUploader(true)}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors"
+            >
+              <Upload size={12} /> Import resume
+            </button>
+            <button
               onClick={() => setTab('preview')}
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors"
             >
@@ -290,6 +318,14 @@ export function EditorPage({ initialResume }: { initialResume?: Resume }) {
       {/* Paywall modal */}
       {paywall !== null && (
         <PaywallModal feature={paywall} onClose={() => setPaywall(null)} />
+      )}
+
+      {/* Resume uploader modal */}
+      {showUploader && (
+        <ResumeUploader
+          onClose={() => setShowUploader(false)}
+          onImport={handleImportResume}
+        />
       )}
     </div>
   )

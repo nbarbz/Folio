@@ -14,7 +14,11 @@
 const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
 const MODEL = 'claude-sonnet-4-20250514'
 
-async function callClaude(systemPrompt: string, userMessage: string): Promise<string> {
+async function callClaude(
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens = 1024
+): Promise<string> {
   if (!API_KEY) {
     throw new Error('Missing Anthropic API key. Add VITE_ANTHROPIC_API_KEY to your .env file.')
   }
@@ -29,7 +33,7 @@ async function callClaude(systemPrompt: string, userMessage: string): Promise<st
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1024,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     }),
@@ -123,6 +127,100 @@ Key experience to highlight: ${keyExperience}
 Write a tailored cover letter.`
 
   return callClaude(system, user)
+}
+
+// ─── Parse resume from text ──────────────────────────────────────────────────
+
+export interface ParsedResume {
+  personal: {
+    name: string
+    title: string
+    email: string
+    phone: string
+    location: string
+    website: string
+    linkedin: string
+    summary: string
+  }
+  experience: Array<{
+    company: string
+    role: string
+    period: string
+    description: string
+    bullets: string[]
+  }>
+  education: Array<{
+    institution: string
+    degree: string
+    period: string
+    gpa?: string
+  }>
+  skills: string[]
+}
+
+export async function parseResumeFromText(resumeText: string): Promise<ParsedResume> {
+  const system = `You are a resume parser. Extract structured data from a raw resume and return it as a single JSON object with this exact shape:
+{
+  "personal": {
+    "name": string,
+    "title": string,
+    "email": string,
+    "phone": string,
+    "location": string,
+    "website": string,
+    "linkedin": string,
+    "summary": string
+  },
+  "experience": [
+    { "company": string, "role": string, "period": string, "description": string, "bullets": string[] }
+  ],
+  "education": [
+    { "institution": string, "degree": string, "period": string, "gpa": string }
+  ],
+  "skills": string[]
+}
+
+Rules:
+- Use empty strings for missing string fields; use empty arrays for missing list fields.
+- "bullets" should be each bullet/responsibility/achievement as its own string, with no leading bullet character.
+- "description" should be a short prose summary of the role; if the source only has bullets, leave it empty.
+- "period" should preserve the original date range formatting (e.g. "Jan 2021 — Present").
+- "skills" is a flat array of skill names — flatten any categories.
+- Return ONLY the JSON object. No markdown fences, no commentary.`
+
+  const user = `Parse this resume:\n\n${resumeText}`
+
+  const text = await callClaude(system, user, 4096)
+  const clean = text.replace(/```json|```/g, '').trim()
+
+  const parsed = JSON.parse(clean) as Partial<ParsedResume>
+
+  return {
+    personal: {
+      name: parsed.personal?.name ?? '',
+      title: parsed.personal?.title ?? '',
+      email: parsed.personal?.email ?? '',
+      phone: parsed.personal?.phone ?? '',
+      location: parsed.personal?.location ?? '',
+      website: parsed.personal?.website ?? '',
+      linkedin: parsed.personal?.linkedin ?? '',
+      summary: parsed.personal?.summary ?? '',
+    },
+    experience: (parsed.experience ?? []).map(e => ({
+      company: e.company ?? '',
+      role: e.role ?? '',
+      period: e.period ?? '',
+      description: e.description ?? '',
+      bullets: Array.isArray(e.bullets) ? e.bullets : [],
+    })),
+    education: (parsed.education ?? []).map(e => ({
+      institution: e.institution ?? '',
+      degree: e.degree ?? '',
+      period: e.period ?? '',
+      gpa: e.gpa,
+    })),
+    skills: Array.isArray(parsed.skills) ? parsed.skills.filter(Boolean) : [],
+  }
 }
 
 // ─── Resume score ─────────────────────────────────────────────────────────────

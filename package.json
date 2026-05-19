@@ -9,14 +9,16 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
-    "@supabase/supabase-js": "^2.43.0",
     "@stripe/stripe-js": "^3.4.0",
+    "@supabase/supabase-js": "^2.43.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.383.0",
+    "mammoth": "^1.12.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.23.0",
-    "react-to-print": "^2.15.1",
-    "lucide-react": "^0.383.0",
-    "clsx": "^2.1.1"
+    "react-to-print": "^2.15.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",

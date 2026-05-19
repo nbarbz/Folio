@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, DragEvent, ChangeEvent } from 'react'
 import { X, Upload, FileText, Sparkles, Loader2, AlertCircle } from 'lucide-react'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
+import mammoth from 'mammoth'
 import { parseResumeFromText, type ParsedResume } from '@/lib/ai'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 interface ResumeUploaderProps {
   onClose: () => void
@@ -9,8 +14,50 @@ interface ResumeUploaderProps {
 
 type Mode = 'upload' | 'paste'
 
-const ACCEPTED_TYPES = ['.txt', '.md', '.rtf']
-const MAX_BYTES = 1_000_000 // 1 MB of text is plenty for a resume
+const ACCEPTED_TYPES = ['.pdf', '.doc', '.docx', '.txt', '.md', '.rtf']
+const MAX_BYTES = 10_000_000 // 10 MB — PDFs/Word docs can be image-heavy
+
+async function extractPdfText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer()
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise
+  try {
+    const pages: string[] = []
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i)
+      const content = await page.getTextContent()
+      const text = content.items
+        .map(item => ('str' in item ? item.str : ''))
+        .join(' ')
+      pages.push(text)
+    }
+    return pages.join('\n\n').replace(/[ \t]+/g, ' ').trim()
+  } finally {
+    await doc.destroy()
+  }
+}
+
+async function extractDocxText(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer()
+  const { value } = await mammoth.extractRawText({ arrayBuffer })
+  return value.trim()
+}
+
+async function extractFileText(file: File): Promise<string> {
+  const lower = file.name.toLowerCase()
+  const type = file.type
+  if (lower.endsWith('.pdf') || type === 'application/pdf') {
+    return extractPdfText(file)
+  }
+  if (
+    lower.endsWith('.docx') ||
+    lower.endsWith('.doc') ||
+    type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    type === 'application/msword'
+  ) {
+    return extractDocxText(file)
+  }
+  return (await file.text()).trim()
+}
 
 export function ResumeUploader({ onClose, onImport }: ResumeUploaderProps) {
   const [mode, setMode] = useState<Mode>('upload')
@@ -18,26 +65,43 @@ export function ResumeUploader({ onClose, onImport }: ResumeUploaderProps) {
   const [fileName, setFileName] = useState<string | null>(null)
   const [fileText, setFileText] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [extracting, setExtracting] = useState(false)
   const [parsing, setParsing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const readFile = useCallback(async (file: File) => {
     setError(null)
+    setFileName(null)
+    setFileText(null)
     if (file.size > MAX_BYTES) {
-      setError('File is too large. Please upload a plain-text resume under 1 MB.')
+      setError('File is too large. Please upload a resume under 10 MB.')
       return
     }
+    setExtracting(true)
     try {
-      const text = await file.text()
+      const text = await extractFileText(file)
       if (!text.trim()) {
-        setError('That file appears to be empty.')
+        setError(
+          'No text could be extracted. If this is a scanned PDF, paste the text instead.'
+        )
         return
       }
       setFileName(file.name)
       setFileText(text)
-    } catch {
-      setError('Could not read that file. Try a plain-text (.txt) version instead.')
+    } catch (err) {
+      console.error('Failed to extract resume text:', err)
+      const lower = file.name.toLowerCase()
+      const kind = lower.endsWith('.pdf')
+        ? 'PDF'
+        : lower.endsWith('.docx') || lower.endsWith('.doc')
+        ? 'Word'
+        : 'file'
+      setError(
+        `Could not read that ${kind}. It may be password-protected, scanned, or corrupted — try pasting the text instead.`
+      )
+    } finally {
+      setExtracting(false)
     }
   }, [])
 
@@ -77,7 +141,9 @@ export function ResumeUploader({ onClose, onImport }: ResumeUploaderProps) {
   }
 
   const canSubmit =
-    !parsing && (mode === 'upload' ? !!fileText : pastedText.trim().length > 0)
+    !parsing &&
+    !extracting &&
+    (mode === 'upload' ? !!fileText : pastedText.trim().length > 0)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -150,7 +216,12 @@ export function ResumeUploader({ onClose, onImport }: ResumeUploaderProps) {
                 onChange={handleFileChange}
                 className="hidden"
               />
-              {fileName ? (
+              {extracting ? (
+                <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+                  <Loader2 size={16} className="animate-spin text-teal-500" />
+                  Extracting text…
+                </div>
+              ) : fileName ? (
                 <div className="flex items-center justify-center gap-2 text-sm text-gray-700">
                   <FileText size={16} className="text-teal-500" />
                   <span className="font-medium">{fileName}</span>
@@ -163,7 +234,7 @@ export function ResumeUploader({ onClose, onImport }: ResumeUploaderProps) {
                     Drag a resume here, or click to browse
                   </div>
                   <div className="text-xs text-gray-400 mt-1">
-                    Plain text works best ({ACCEPTED_TYPES.join(', ')}, max 1 MB)
+                    PDF, Word, or plain text ({ACCEPTED_TYPES.join(', ')}, max 10 MB)
                   </div>
                 </>
               )}
